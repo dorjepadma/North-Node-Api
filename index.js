@@ -126,8 +126,7 @@ const testHouseSystem = 'P'; // Placidus
 
 // Direct house calculation test
 const testHouses = swisseph.swe_houses(testJd, testLat, testLon, testHouseSystem);
-console.log(`  Test Ascendant: ${degreesToZodiac(testHouses.ascendant)}`);
-console.log(`  Test MC: ${degreesToZodiac(testHouses.mc)}`);
+
 
 // Try with explicit UT time calculation
 const explicitUTJD = swisseph.swe_julday(1971, 8, 25, 23.4833, swisseph.SE_GREG_CAL);
@@ -208,8 +207,7 @@ app.get("/north-node", (req, res) => {
 
     const nodeLon = nodeResult.longitude;
     const nodeLat = nodeResult.latitude;
-    console.log("🌀 Node longitude:", nodeLon.toFixed(2));
-    console.log("🚰 Node latitude:", nodeLat.toFixed(4));
+
 
     // 🏠 Calculate house cusps with Placidus method
     const houseResult = swisseph.swe_houses(jd, latNum, lonNum, 'P');
@@ -222,14 +220,7 @@ app.get("/north-node", (req, res) => {
     const mc = houseResult.mc;
     const cusps = houseResult.house;
 
-    console.log(`🔍 Placidus Ascendant: ${ascendant.toFixed(2)}°`);
-    console.log(`🌟 ARMC (Right Ascension MC): ${houseResult.armc.toFixed(2)}°`);
 
-    // Log detailed positions
-    console.log(`🔺 Ascendant: ${degreesToZodiac(ascendant)}`);
-    console.log(`🌠 Midheaven (MC): ${degreesToZodiac(mc)}`);
-    console.log(`🌀 North Node: ${degreesToZodiac(nodeLon)}`);
-    
     // Compare with expected values for debugging
     if (localYear === 1971 && localMonth === 8 && localDay === 25 && Math.abs(localHour - 16.483) < 0.01) 
 
@@ -250,7 +241,6 @@ app.get("/north-node", (req, res) => {
       // Get the next cusp, with wrap-around to the first cusp if needed
       const nextCusp = (i === 11) ? cusps[0] : cusps[i + 1];
       
-      console.log(`🔍 Testing North Node ${nodeLon.toFixed(2)}° in range from ${currentCusp.toFixed(2)}° to ${nextCusp.toFixed(2)}°`);
       
       // Some house cusps might cross over 0° Aries, so we need special handling
       if (nextCusp < currentCusp) {
@@ -272,12 +262,7 @@ app.get("/north-node", (req, res) => {
         }
       }
     }
-    
-    // If no house was found (shouldn't happen, but just in case)
-    if (house === 0) {
-      console.log(`⚠️ No house found for Node at ${nodeLon.toFixed(2)}°, defaulting to house 1`);
-      house = 1;
-    }
+
     
     console.log(`🌟 Final house assignment for Node: ${house}`);
 
