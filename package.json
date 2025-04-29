@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+  "start": "node index.js",
+  "preinstall": "npm install node-gyp -g",
+  "postinstall": "npm rebuild"
   },
   "dependencies": {
     "cors": "^2.8.5",
@@ -12,7 +14,7 @@
     "geo-tz": "^8.1.4",
     "luxon": "^3.6.1",
     "moment-timezone": "^0.5.48",
-    "sweph": "^2.10.3-4",
     "swisseph": "^0.5.17"
   }
+
 }
