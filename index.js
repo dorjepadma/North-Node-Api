@@ -160,30 +160,7 @@ app.get("/north-node", (req, res) => {
   let utHour;
   let jd;
   
-  // // For Truchas, NM in summer 1971, use our known correct UT time
-  // if (localYear === 1971 && localMonth === 8 && localDay === 25 && 
-  //     Math.abs(localHour - 16.483) < 0.01 && 
-  //     Math.abs(latNum - 36.0441834) < 0.1 && 
-  //     Math.abs(lonNum - (-105.8127561)) < 0.1) {
-  //   console.log("🔄 Using known correct time for Truchas, NM 1971");
-  //   utHour = 22.4833; // This is the time that gave correct results in our tests
-  //   jd = swisseph.swe_julday(localYear, localMonth, localDay, utHour, swisseph.SE_GREG_CAL);
-  // } else {
-  //   // For all other cases, use our timezone estimation function
-  //   const timezone = estimateTimezone(lonNum, latNum, localYear, localMonth);
-  //   console.log(`🕒 Estimated timezone: ${timezone.id} (UTC${timezone.offset >= 0 ? '+' : ''}${timezone.offset})`);
-    
-  //   // Convert local time to UT
-  //   utHour = localHour - timezone.offset;
-    
-  //   // Ensure UT hour is within proper range (0-24)
-  //   while (utHour < 0) utHour += 24;
-  //   while (utHour >= 24) utHour -= 24;
-    
-  //   // Calculate Julian Day with UT time
-  //   jd = swisseph.swe_julday(localYear, localMonth, localDay, utHour, swisseph.SE_GREG_CAL);
-  // }
-  // Use our timezone estimation function
+ 
 const timezone = estimateTimezone(lonNum, latNum, localYear, localMonth);
 console.log(`🕒 Estimated timezone: ${timezone.id} (UTC${timezone.offset >= 0 ? '+' : ''}${timezone.offset})`);
 
@@ -232,10 +209,6 @@ jd = swisseph.swe_julday(localYear, localMonth, localDay, utHour, swisseph.SE_GR
     const ascendant = houseResult.ascendant;
     const mc = houseResult.mc;
     const cusps = houseResult.house;
-
-
-    // Compare with expected values for debugging
-    // if (localYear === 1971 && localMonth === 8 && localDay === 25 && Math.abs(localHour - 16.483) < 0.01) 
 
     // Log all house cusps with zodiac positions
     console.log("🏠 House cusps with zodiac positions:");
