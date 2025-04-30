@@ -15,6 +15,9 @@
     "luxon": "^3.6.1",
     "moment-timezone": "^0.5.48",
     "swisseph": "^0.5.17"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 
 }
