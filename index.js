@@ -7,7 +7,12 @@ const cors = require("cors");
 const { DateTime } = require("luxon");
 
 const app = express();
-app.use(cors({ origin: "http://astro-sand-box.local" }));
+app.use(cors({
+  origin: [
+    "https://www.janspiller.com", 
+    "http://astro-sand-box.local"
+  ]
+}));
 
 const PORT = 3000;
 
