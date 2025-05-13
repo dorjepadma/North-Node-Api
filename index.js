@@ -77,34 +77,38 @@ function getNthDayOfMonth(year, month, dayOfWeek, n) {
   return firstOccurrence + (n - 1) * 7;
 }
 
-// Function to estimate timezone based on location information
-function processTimezone(longitude, latitude, year, month, day, hour, requestedTimezone = null) {
-  // If the user has explicitly provided a timezone code and offset, use that
-  if (requestedTimezone && requestedTimezone.code && typeof requestedTimezone.offset === 'number') {
-    console.log(`🌐 Using provided timezone: ${requestedTimezone.code} (UTC${requestedTimezone.offset >= 0 ? '+' : ''}${requestedTimezone.offset})`);
-    return {
-      id: requestedTimezone.code,
-      offset: requestedTimezone.offset
-    };
-  }
-  
-  // If the request is for a well-known historical time with known offset (like EST+5:00)
-  // This handles cases where the client explicitly knows the timezone offset
-  if (requestedTimezone && typeof requestedTimezone === 'string') {
-    // Parse formats like "EST+5:00" or "EST-5:00"
-    const match = requestedTimezone.match(/([A-Z]+)([+-])(\d+):(\d+)/);
-    if (match) {
-      const code = match[1];
-      const sign = match[2] === '+' ? 1 : -1;
-      const hours = parseInt(match[3]);
-      const minutes = parseInt(match[4]);
+// Process timezone information from request
+function processTimezone(longitude, latitude, year, month, day, hour, tzParam = null) {
+  // If the user has explicitly provided a timezone, parse and use it
+  if (tzParam) {
+    // Parse formats like "EST+5:00" or "EST-5:00" or "EST+5" or "+5:00"
+    const complexMatch = tzParam.match(/([A-Z]+)?([+-])(\d+)(?::(\d+))?/);
+    if (complexMatch) {
+      const code = complexMatch[1] || "UTC";
+      const sign = complexMatch[2] === '+' ? 1 : -1;
+      const hours = parseInt(complexMatch[3]);
+      const minutes = complexMatch[4] ? parseInt(complexMatch[4]) : 0;
       const offset = sign * (hours + minutes / 60);
       
-      console.log(`🌐 Using timezone from time format: ${code} (UTC${offset >= 0 ? '+' : ''}${offset})`);
+      console.log(`🌐 Using explicit timezone: ${code} (UTC${offset >= 0 ? '+' : ''}${offset})`);
       
       return {
         id: code,
         offset: offset
+      };
+    }
+    
+    // Also try to parse simple numeric offsets like "5" or "-5"
+    const simpleMatch = tzParam.match(/^([+-])?(\d+)$/);
+    if (simpleMatch) {
+      const sign = simpleMatch[1] === '-' ? -1 : 1;
+      const hours = parseInt(simpleMatch[2]);
+      
+      console.log(`🌐 Using numeric timezone offset: UTC${sign >= 0 ? '+' : ''}${sign * hours}`);
+      
+      return {
+        id: "UTC",
+        offset: sign * hours
       };
     }
   }
@@ -137,59 +141,127 @@ function processTimezone(longitude, latitude, year, month, day, hour, requestedT
     { min: 165, max: 180, id: "Pacific/Auckland", stdOffset: 12 },
   ];
   
-  // For Connecticut, longitude -72°, we should use America/New_York timezone
-  let timezoneEntry;
+  // Find the timezone entry based on longitude
+  let timezoneEntry = timezonesByLongitude.find(
+    (tz) => longitude >= tz.min && longitude < tz.max
+  ) || { id: "UTC", stdOffset: 0 };
   
-  // Special case handling for locations known to be in specific timezones
-  if (longitude >= -75 && longitude <= -70 && latitude >= 41 && latitude <= 43) {
-    // This is New England area (including Connecticut)
-    timezoneEntry = { id: "America/New_York", stdOffset: -5 };
-    console.log(`🌐 Location detected as New England/Connecticut, using America/New_York timezone`);
-  } else {
-    // Find the timezone entry based on longitude
-    timezoneEntry = timezonesByLongitude.find(
-      (tz) => longitude >= tz.min && longitude < tz.max
-    ) || { id: "UTC", stdOffset: 0 };
-  }
-  
-  // For historical dates, DST rules were different
+  // Known DST rules for specific regions and time periods
   let dstOffset = 0;
   
-  // Check if location is in the US East Coast (including Connecticut)
-  if (timezoneEntry.id === "America/New_York") {
-    // Handle specific historical DST rules for Eastern Time Zone
-    if (year === 1971) {
-      // 1971 DST specifically started April 25th and ended October 31st
-      const dstStartDay = getLastDayOfMonth(year, 4, 0); // Last Sunday in April (25th in 1971)
-      const dstEndDay = getLastDayOfMonth(year, 10, 0); // Last Sunday in October (31st in 1971)
-      
-      console.log(`🔍 DST 1971 for ET: Starts on April ${dstStartDay}, ends on October ${dstEndDay}`);
-      console.log(`📅 Checking date: ${month}/${day}/${year}`);
-      
-      if ((month > 4 && month < 10) ||
-          (month === 4 && day >= dstStartDay) ||
-          (month === 10 && day < dstEndDay)) {
-        dstOffset = 1;
-        console.log(`✅ DST applies: +${dstOffset} hour offset`);
-      } else {
-        console.log(`❌ DST does not apply for date ${month}/${day}/${year}`);
-      }
-    } 
-    else if (year >= 1966 && year <= 1986) {
+  // US/Canada DST handling
+  if (timezoneEntry.id.startsWith("America/")) {
+    // For US East Coast
+    if (timezoneEntry.id === "America/New_York") {
       // 1966-1986: Last Sunday in April to Last Sunday in October
-      const dstStartDay = getLastDayOfMonth(year, 4, 0); // Last Sunday in April
-      const dstEndDay = getLastDayOfMonth(year, 10, 0); // Last Sunday in October
-      
-      console.log(`🔍 US DST 1966-1986: Starts on April ${dstStartDay}, ends on October ${dstEndDay}`);
-      console.log(`📅 Checking date: ${month}/${day}/${year}`);
-      
-      if ((month > 4 && month < 10) ||
-          (month === 4 && day >= dstStartDay) ||
-          (month === 10 && day < dstEndDay)) {
-        dstOffset = 1;
-        console.log(`✅ DST applies: +${dstOffset} hour offset`);
-      } else {
-        console.log(`❌ DST does not apply`);
+      if (year >= 1966 && year <= 1986) {
+        const dstStartDay = getLastDayOfMonth(year, 4, 0); // Last Sunday in April
+        const dstEndDay = getLastDayOfMonth(year, 10, 0); // Last Sunday in October
+        
+        console.log(`🔍 US DST 1966-1986: Starts on April ${dstStartDay}, ends on October ${dstEndDay}`);
+        console.log(`📅 Checking date: ${month}/${day}/${year}`);
+        
+        if ((month > 4 && month < 10) ||
+            (month === 4 && day >= dstStartDay) ||
+            (month === 10 && day < dstEndDay)) {
+          dstOffset = 1;
+          console.log(`✅ DST applies: +${dstOffset} hour offset`);
+        } else {
+          console.log(`❌ DST does not apply`);
+        }
+      }
+      // 1987-2006: First Sunday in April to Last Sunday in October
+      else if (year >= 1987 && year <= 2006) {
+        const dstStartDay = getNthDayOfMonth(year, 4, 0, 1); // First Sunday
+        const dstEndDay = getLastDayOfMonth(year, 10, 0);
+        
+        console.log(`🔍 US DST 1987-2006: Starts on April ${dstStartDay}, ends on October ${dstEndDay}`);
+        console.log(`📅 Checking date: ${month}/${day}/${year}`);
+        
+        if ((month > 4 && month < 10) ||
+            (month === 4 && day >= dstStartDay) ||
+            (month === 10 && day < dstEndDay)) {
+          dstOffset = 1;
+          console.log(`✅ DST applies: +${dstOffset} hour offset`);
+        } else {
+          console.log(`❌ DST does not apply`);
+        }
+      }
+      // 2007-present: Second Sunday in March to First Sunday in November
+      else if (year >= 2007) {
+        const dstStartDay = getNthDayOfMonth(year, 3, 0, 2); // Second Sunday
+        const dstEndDay = getNthDayOfMonth(year, 11, 0, 1); // First Sunday
+        
+        console.log(`🔍 US DST 2007-present: Starts on March ${dstStartDay}, ends on November ${dstEndDay}`);
+        console.log(`📅 Checking date: ${month}/${day}/${year}`);
+        
+        if ((month > 3 && month < 11) ||
+            (month === 3 && day >= dstStartDay) ||
+            (month === 11 && day < dstEndDay)) {
+          dstOffset = 1;
+          console.log(`✅ DST applies: +${dstOffset} hour offset`);
+        } else {
+          console.log(`❌ DST does not apply`);
+        }
+      }
+    }
+    // For Halifax and Atlantic Canada
+    else if (timezoneEntry.id === "America/Halifax") {
+      // Halifax followed similar rules to US but with some variations
+      if (year >= 1966 && year <= 1986) {
+        const dstStartDay = getLastDayOfMonth(year, 4, 0); // Last Sunday in April
+        const dstEndDay = getLastDayOfMonth(year, 10, 0); // Last Sunday in October
+        
+        console.log(`🔍 Halifax DST 1966-1986: Starts on April ${dstStartDay}, ends on October ${dstEndDay}`);
+        console.log(`📅 Checking date: ${month}/${day}/${year}`);
+        
+        if ((month > 4 && month < 10) ||
+            (month === 4 && day >= dstStartDay) ||
+            (month === 10 && day < dstEndDay)) {
+          dstOffset = 1;
+          console.log(`✅ DST applies: +${dstOffset} hour offset`);
+        } else {
+          console.log(`❌ DST does not apply`);
+        }
+      }
+    }
+  }
+  // Europe DST handling
+  else if (timezoneEntry.id.startsWith("Europe/")) {
+    if (year >= 1980) {
+      // 1980-1996: Last Sunday in March to Last Sunday in September
+      if (year <= 1996) {
+        const dstStartDay = getLastDayOfMonth(year, 3, 0); // Last Sunday in March
+        const dstEndDay = getLastDayOfMonth(year, 9, 0); // Last Sunday in September
+        
+        console.log(`🔍 European DST 1980-1996: Starts on March ${dstStartDay}, ends on September ${dstEndDay}`);
+        console.log(`📅 Checking date: ${month}/${day}/${year}`);
+        
+        if ((month > 3 && month < 9) ||
+            (month === 3 && day >= dstStartDay) ||
+            (month === 9 && day < dstEndDay)) {
+          dstOffset = 1;
+          console.log(`✅ DST applies: +${dstOffset} hour offset`);
+        } else {
+          console.log(`❌ DST does not apply`);
+        }
+      }
+      // 1997-present: Last Sunday in March to Last Sunday in October
+      else {
+        const dstStartDay = getLastDayOfMonth(year, 3, 0); // Last Sunday in March
+        const dstEndDay = getLastDayOfMonth(year, 10, 0); // Last Sunday in October
+        
+        console.log(`🔍 European DST 1997-present: Starts on March ${dstStartDay}, ends on October ${dstEndDay}`);
+        console.log(`📅 Checking date: ${month}/${day}/${year}`);
+        
+        if ((month > 3 && month < 10) ||
+            (month === 3 && day >= dstStartDay) ||
+            (month === 10 && day < dstEndDay)) {
+          dstOffset = 1;
+          console.log(`✅ DST applies: +${dstOffset} hour offset`);
+        } else {
+          console.log(`❌ DST does not apply`);
+        }
       }
     }
   }
@@ -206,7 +278,7 @@ app.get("/north-node", (req, res) => {
   const { year, month, day, hour, lat, lon, tz } = req.query;
 
   if (!year || !month || !day || !hour || !lat || !lon) {
-    return res.status(400).json({ error: "Missing parameters" });
+    return res.status(400).json({ error: "Missing required parameters" });
   }
 
   // 🔢 Parse inputs
@@ -217,27 +289,9 @@ app.get("/north-node", (req, res) => {
   const latNum = parseFloat(lat);
   const lonNum = parseFloat(lon);
   
-  // Process timezone - check if a specific timezone was provided
-  let timezone;
-  if (tz) {
-    // If timezone was provided in format like "EST+5:00"
-    timezone = processTimezone(lonNum, latNum, localYear, localMonth, localDay, localHour, tz);
-  } else {
-    // Otherwise, estimate based on location
-    timezone = processTimezone(lonNum, latNum, localYear, localMonth, localDay, localHour);
-  }
-  
+  // Process timezone - use explicit timezone if provided, otherwise estimate based on location
+  const timezone = processTimezone(lonNum, latNum, localYear, localMonth, localDay, localHour, tz);
   console.log(`🕒 Using timezone: ${timezone.id} (UTC${timezone.offset >= 0 ? '+' : ''}${timezone.offset})`);
-  
-  // Special case handling for known charts
-  if (localYear === 1971 && localMonth === 4 && localDay === 18 && 
-      Math.abs(localHour - 5.25) < 0.01 && 
-      Math.abs(latNum - 41.7759301) < 0.1 && 
-      Math.abs(lonNum - (-72.52150089999999)) < 0.1) {
-    console.log("🎯 Recognized specific chart: Stephanie Shea, April 18, 1971, 5:15 AM EST");
-    console.log("⚠️ Using manual timezone override: EST+5:00");
-    timezone = { id: "EST", offset: 5 };
-  }
 
   // Convert local time to UT
   let utHour = localHour - timezone.offset;
