@@ -45,6 +45,37 @@ function getOrdinal(n) {
   return "th";
 }
 
+// Helper function to get the last specified day of a month
+function getLastDayOfMonth(year, month, targetDayOfWeek) {
+  // Get the last day of the month
+  const lastDay = new Date(year, month, 0).getDate();
+  
+  // Start from the last day of the month
+  let date = new Date(year, month - 1, lastDay);
+  
+  // Move backwards until we find the target day of week
+  while (date.getDay() !== targetDayOfWeek) {
+    date.setDate(date.getDate() - 1);
+  }
+  
+  return date.getDate();
+}
+
+// Helper function to get the nth specified day of a month
+function getNthDayOfMonth(year, month, dayOfWeek, n) {
+  // Create a date for the first day of the month
+  const date = new Date(year, month - 1, 1);
+  
+  // Find the day of week of the first day
+  const firstDayOfWeek = date.getDay();
+  
+  // Calculate the date of the first occurrence of the specified day
+  let firstOccurrence = 1 + ((dayOfWeek - firstDayOfWeek + 7) % 7);
+  
+  // Calculate the date of the nth occurrence
+  return firstOccurrence + (n - 1) * 7;
+}
+
 /**
  * Map longitude to IANA timezone identifier
  * This is a simplified version that covers major US and international timezones
@@ -95,10 +126,17 @@ function getLikelyTimezoneId(longitude, latitude) {
 }
 
 /**
- * Process timezone and DST information using Luxon
- * Properly handles historical DST transitions based on the article recommendations
+ * Process timezone and DST information
+ * Combines the best of both approaches: manual DST calculation for reliability
+ * with Luxon support for additional verification
  */
 function processTimezone(longitude, latitude, year, month, day, hour, tzParam = null) {
+  // Debug info for analysis
+  const debugDetails = {
+    source: "unknown",
+    originalParams: { year, month, day, hour, longitude, latitude, tzParam }
+  };
+  
   // If explicit timezone is provided, parse and use it
   if (tzParam) {
     console.log(`🌐 Parsing explicit timezone parameter: ${tzParam}`);
@@ -114,9 +152,12 @@ function processTimezone(longitude, latitude, year, month, day, hour, tzParam = 
       
       console.log(`🌐 Parsed timezone: ${code} (UTC${offset >= 0 ? '+' : ''}${offset})`);
       
+      debugDetails.source = "explicit_tz_param";
       return {
         id: code,
-        offset: -offset  // Negate the offset for calculations
+        offset: -offset,  // Negate the offset for calculations
+        isDST: false,     // Can't determine DST from just the offset
+        debug: debugDetails
       };
     }
     
@@ -128,9 +169,12 @@ function processTimezone(longitude, latitude, year, month, day, hour, tzParam = 
       
       console.log(`🌐 Using numeric timezone offset: UTC${sign >= 0 ? '+' : ''}${sign * hours}`);
       
+      debugDetails.source = "numeric_offset";
       return {
         id: "UTC",
-        offset: sign * hours
+        offset: sign * hours,
+        isDST: false,
+        debug: debugDetails
       };
     }
   }
@@ -139,85 +183,174 @@ function processTimezone(longitude, latitude, year, month, day, hour, tzParam = 
   const tzid = getLikelyTimezoneId(longitude, latitude);
   console.log(`🌎 Determined timezone from coordinates: ${tzid}`);
   
+  // Try Luxon first for modern DST handling
   try {
+    // Get the integer versions of time components for better compatibility
+    const intYear = Math.floor(year);
+    const intMonth = Math.floor(month);
+    const intDay = Math.floor(day);
+    const intHour = Math.floor(hour);
+    const minuteFloat = (hour - intHour) * 60;
+    const intMinute = Math.floor(minuteFloat);
+    const intSecond = Math.floor((minuteFloat - intMinute) * 60);
+    
     // Create a DateTime object for the given date and timezone
-    // Use the 'earlier' offset for ambiguous times to match historical behavior
-    const dtOptions = { 
+    const dateTime = DateTime.fromObject({
+      year: intYear,
+      month: intMonth,
+      day: intDay,
+      hour: intHour,
+      minute: intMinute,
+      second: intSecond
+    }, { 
       zone: tzid,
       offset: "earlier", // For ambiguous times during fall-back transitions
       invalid: "constrain" // For non-existent times during spring-forward transitions
-    };
-    
-    const dateTime = DateTime.fromObject({
-      year,
-      month,
-      day,
-      hour
-    }, dtOptions);
+    });
     
     // Check if the date is valid
-    if (!dateTime.isValid) {
-      console.log(`⚠️ Warning: Invalid date created: ${dateTime.invalidReason}`);
+    if (dateTime.isValid) {
+      // Extract timezone information including offset and DST status
+      const offset = -dateTime.offset / 60; // Convert minutes to hours and negate for astronomical calculations
       
-      // Fallback for invalid dates
+      // Detailed logging for analysis
+      console.log(`🕒 Valid Luxon Date: ${dateTime.toISO()}`);
+      console.log(`🕒 UTC Offset: ${offset} hours (including DST: ${dateTime.isInDST})`);
+      
+      debugDetails.source = "luxon_success";
       return {
         id: tzid,
-        offset: getStandardOffset(tzid),
-        isDST: false
+        offset: offset,
+        isDST: dateTime.isInDST,
+        luxonObject: dateTime,
+        debug: debugDetails
       };
+    } else {
+      console.log(`⚠️ Warning: Invalid Luxon date: ${dateTime.invalidReason}`);
     }
-    
-    // Extract timezone information including offset and DST status
-    const offset = -dateTime.offset / 60; // Convert minutes to hours and negate for astronomical calculations
-    
-    // Detailed logging for analysis
-    console.log(`🕒 Date: ${year}-${month}-${day} ${hour}:00 in ${tzid}`);
-    console.log(`🕒 UTC Offset: ${offset} hours (including DST: ${dateTime.isInDST})`);
-    
-    // Analyze DST transition points if we're near a potential boundary
-    const checkNearTransition = () => {
-      try {
-        // Try to determine the next DST transition
-        const nextTransition = dateTime.zone.nextTransition(dateTime);
-        
-        // If there is a transition and it's within 5 days of our date
-        if (nextTransition && Math.abs(nextTransition.diff(dateTime, 'days').days) < 5) {
-          console.log(`⚠️ NEAR DST TRANSITION: ${nextTransition.toISO()}`);
-          console.log(`   Current DST status: ${dateTime.isInDST ? "IN DST" : "NOT IN DST"}`);
-          console.log(`   Current offset: ${dateTime.offset} minutes`);
-          
-          // Check the offset before and after the transition
-          const beforeTransition = nextTransition.minus({ minutes: 1 });
-          const afterTransition = nextTransition.plus({ minutes: 1 });
-          
-          console.log(`   Before transition: offset=${beforeTransition.offset}, DST=${beforeTransition.isInDST}`);
-          console.log(`   After transition: offset=${afterTransition.offset}, DST=${afterTransition.isInDST}`);
-        }
-      } catch (e) {
-        // Some older timestamps might not have transition data
-        console.log(`   Unable to determine transitions: ${e.message}`);
-      }
-    };
-    
-    // Run the transition check for dates that might be problematic
-    checkNearTransition();
-    
-    return {
-      id: tzid,
-      offset: offset,
-      isDST: dateTime.isInDST,
-      luxonObject: dateTime // Include the luxon object for potential advanced usage
-    };
   } catch (error) {
-    console.log(`⚠️ Error processing date with Luxon: ${error.message}`);
-    
-    // Fallback to standard timezone offset without DST
-    return {
-      id: tzid,
-      offset: getStandardOffset(tzid),
-      isDST: false
-    };
+    console.log(`⚠️ Error with Luxon: ${error.message}`);
   }
+  
+  // Fallback to our manual DST calculation for reliability
+  // Define timezone standard offset based on the ID
+  let stdOffset = getStandardOffset(tzid);
+  let dstOffset = 0;
+  debugDetails.source = "manual_calculation";
+  
+  // US timezone DST rules by year range
+  if (tzid === "America/New_York" || tzid === "America/Chicago" || 
+      tzid === "America/Denver" || tzid === "America/Los_Angeles") {
+    
+    // First, determine if the date is in a range where DST was used in the US
+    // No DST before 1966 for our purposes
+    if (year < 1966) {
+      console.log(`🕒 Date before 1966 - no DST applied`);
+    }
+    // 1966-1986: Last Sunday in April to Last Sunday in October
+    else if (year >= 1966 && year <= 1986) {
+      const dstStartDay = getLastDayOfMonth(year, 4, 0); // Last Sunday in April
+      const dstEndDay = getLastDayOfMonth(year, 10, 0); // Last Sunday in October
+      
+      console.log(`🔍 US DST 1966-1986: Starts on April ${dstStartDay}, ends on October ${dstEndDay}`);
+      console.log(`📅 Checking date: ${month}/${day}/${year}`);
+      
+      if ((month > 4 && month < 10) ||
+          (month === 4 && day >= dstStartDay) ||
+          (month === 10 && day < dstEndDay)) {
+        dstOffset = 1;
+        console.log(`✅ DST applies: +${dstOffset} hour offset`);
+      } else {
+        console.log(`❌ DST does not apply`);
+      }
+    }
+    // 1987-2006: First Sunday in April to Last Sunday in October
+    else if (year >= 1987 && year <= 2006) {
+      const dstStartDay = getNthDayOfMonth(year, 4, 0, 1); // First Sunday in April
+      const dstEndDay = getLastDayOfMonth(year, 10, 0); // Last Sunday in October
+      
+      console.log(`🔍 US DST 1987-2006: Starts on April ${dstStartDay}, ends on October ${dstEndDay}`);
+      console.log(`📅 Checking date: ${month}/${day}/${year}`);
+      
+      if ((month > 4 && month < 10) ||
+          (month === 4 && day >= dstStartDay) ||
+          (month === 10 && day < dstEndDay)) {
+        dstOffset = 1;
+        console.log(`✅ DST applies: +${dstOffset} hour offset`);
+      } else {
+        console.log(`❌ DST does not apply`);
+      }
+    }
+    // 2007-present: Second Sunday in March to First Sunday in November
+    else if (year >= 2007) {
+      const dstStartDay = getNthDayOfMonth(year, 3, 0, 2); // Second Sunday in March
+      const dstEndDay = getNthDayOfMonth(year, 11, 0, 1); // First Sunday in November
+      
+      console.log(`🔍 US DST 2007-present: Starts on March ${dstStartDay}, ends on November ${dstEndDay}`);
+      console.log(`📅 Checking date: ${month}/${day}/${year}`);
+      
+      if ((month > 3 && month < 11) ||
+          (month === 3 && day >= dstStartDay) ||
+          (month === 11 && day < dstEndDay)) {
+        dstOffset = 1;
+        console.log(`✅ DST applies: +${dstOffset} hour offset`);
+      } else {
+        console.log(`❌ DST does not apply`);
+      }
+    }
+  }
+  // Europe DST handling
+  else if (tzid.startsWith("Europe/")) {
+    if (year >= 1980) {
+      // 1980-1996: Last Sunday in March to Last Sunday in September
+      if (year <= 1996) {
+        const dstStartDay = getLastDayOfMonth(year, 3, 0); // Last Sunday in March
+        const dstEndDay = getLastDayOfMonth(year, 9, 0); // Last Sunday in September
+        
+        console.log(`🔍 European DST 1980-1996: Starts on March ${dstStartDay}, ends on September ${dstEndDay}`);
+        console.log(`📅 Checking date: ${month}/${day}/${year}`);
+        
+        if ((month > 3 && month < 9) ||
+            (month === 3 && day >= dstStartDay) ||
+            (month === 9 && day < dstEndDay)) {
+          dstOffset = 1;
+          console.log(`✅ DST applies: +${dstOffset} hour offset`);
+        } else {
+          console.log(`❌ DST does not apply`);
+        }
+      }
+      // 1997-present: Last Sunday in March to Last Sunday in October
+      else {
+        const dstStartDay = getLastDayOfMonth(year, 3, 0); // Last Sunday in March
+        const dstEndDay = getLastDayOfMonth(year, 10, 0); // Last Sunday in October
+        
+        console.log(`🔍 European DST 1997-present: Starts on March ${dstStartDay}, ends on October ${dstEndDay}`);
+        console.log(`📅 Checking date: ${month}/${day}/${year}`);
+        
+        if ((month > 3 && month < 10) ||
+            (month === 3 && day >= dstStartDay) ||
+            (month === 10 && day < dstEndDay)) {
+          dstOffset = 1;
+          console.log(`✅ DST applies: +${dstOffset} hour offset`);
+        } else {
+          console.log(`❌ DST does not apply`);
+        }
+      }
+    }
+  }
+  
+  const totalOffset = stdOffset + dstOffset;
+  console.log(`🔄 MANUAL CALCULATION:`);
+  console.log(`   - Base timezone offset: ${stdOffset}`);
+  console.log(`   - DST offset applied: ${dstOffset}`);
+  console.log(`   - Total offset: ${totalOffset}`);
+  
+  return {
+    id: tzid,
+    offset: totalOffset,
+    isDST: dstOffset !== 0,
+    debug: debugDetails
+  };
 }
 
 /**
@@ -271,11 +404,11 @@ app.get("/north-node", (req, res) => {
   const timezone = processTimezone(lonNum, latNum, localYear, localMonth, localDay, localHour, tz);
   console.log(`🕒 Using timezone: ${timezone.id} (UTC${timezone.offset >= 0 ? '+' : ''}${timezone.offset})`);
 
-  // Convert local time to UT using Luxon's capabilities if available
+  // Convert local time to UT (try Luxon first, fallback to manual calculation)
   let utHour, utDay, utMonth, utYear;
   
-  // If we have a Luxon DateTime object, use it for the UT conversion
-  if (timezone.luxonObject) {
+  // If we have a valid Luxon DateTime object, use it for the UT conversion
+  if (timezone.luxonObject && timezone.luxonObject.isValid) {
     const utcDateTime = timezone.luxonObject.toUTC();
     utYear = utcDateTime.year;
     utMonth = utcDateTime.month;
@@ -284,7 +417,7 @@ app.get("/north-node", (req, res) => {
     
     console.log(`🕒 Converting to UT using Luxon: ${utcDateTime.toISO()}`);
   } else {
-    // Fallback to manual calculation if Luxon object not available
+    // Fallback to manual calculation if Luxon object not available or invalid
     utHour = localHour - timezone.offset;
 
     // Ensure UT hour is within proper range (0-24)
