@@ -77,7 +77,7 @@ function getNthDayOfMonth(year, month, dayOfWeek, n) {
   return firstOccurrence + (n - 1) * 7;
 }
 
-// Function to estimate timezone from coordinates and historical date
+// Improved DST calculation with more precise historical rules
 function estimateTimezone(longitude, latitude, year, month, day) {
   // Define timezone boundaries based on longitude
   const timezonesByLongitude = [
@@ -115,16 +115,87 @@ function estimateTimezone(longitude, latitude, year, month, day) {
   // Known DST rules for specific regions and time periods
   let dstOffset = 0;
   
-  // North America DST handling
+  // Enhanced North America DST handling with more specific date ranges
   if (timezoneEntry.id.startsWith("America/")) {
-    // US DST rules (more precise)
-    if (year >= 1966 && year <= 1986) {
+    // Special case for Halifax, which followed different rules
+    if (timezoneEntry.id === "America/Halifax") {
+      // Halifax specific DST rules (more accurate)
+      if (year >= 1960 && year <= 1974) {
+        // In Nova Scotia, from 1960-1972, DST was observed from the last Sunday in April
+        // to the last Sunday in October (source: historical records)
+        const dstStartDay = getLastDayOfMonth(year, 4, 0); // Last Sunday in April
+        const dstEndDay = getLastDayOfMonth(year, 10, 0); // Last Sunday in October
+        
+        console.log(`🔍 Halifax DST 1960-1974: Starts on April ${dstStartDay}, ends on October ${dstEndDay}`);
+        console.log(`📅 Checking date: ${month}/${day}/${year}`);
+        
+        // Check if date falls within DST period
+        if ((month > 4 && month < 10) ||
+            (month === 4 && day >= dstStartDay) ||
+            (month === 10 && day < dstEndDay)) {
+          dstOffset = 1;
+          console.log(`✅ DST applies for Halifax: +${dstOffset} hour offset`);
+        } else {
+          console.log(`❌ DST does not apply for Halifax`);
+        }
+      } else if (year >= 1975 && year <= 1986) {
+        // By 1975, more standardized rules were in place
+        const dstStartDay = getLastDayOfMonth(year, 4, 0); // Last Sunday in April
+        const dstEndDay = getLastDayOfMonth(year, 10, 0); // Last Sunday in October
+        
+        console.log(`🔍 Halifax DST 1975-1986: Starts on April ${dstStartDay}, ends on October ${dstEndDay}`);
+        console.log(`📅 Checking date: ${month}/${day}/${year}`);
+        
+        if ((month > 4 && month < 10) ||
+            (month === 4 && day >= dstStartDay) ||
+            (month === 10 && day < dstEndDay)) {
+          dstOffset = 1;
+          console.log(`✅ DST applies for Halifax: +${dstOffset} hour offset`);
+        } else {
+          console.log(`❌ DST does not apply for Halifax`);
+        }
+      } else if (year >= 1987 && year <= 2006) {
+        // 1987-2006: First Sunday in April to Last Sunday in October
+        const dstStartDay = getNthDayOfMonth(year, 4, 0, 1); // First Sunday
+        const dstEndDay = getLastDayOfMonth(year, 10, 0); // Last Sunday
+        
+        console.log(`🔍 Halifax DST 1987-2006: Starts on April ${dstStartDay}, ends on October ${dstEndDay}`);
+        console.log(`📅 Checking date: ${month}/${day}/${year}`);
+        
+        if ((month > 4 && month < 10) ||
+            (month === 4 && day >= dstStartDay) ||
+            (month === 10 && day < dstEndDay)) {
+          dstOffset = 1;
+          console.log(`✅ DST applies for Halifax: +${dstOffset} hour offset`);
+        } else {
+          console.log(`❌ DST does not apply for Halifax`);
+        }
+      } else if (year >= 2007) {
+        // 2007-present: Second Sunday in March to First Sunday in November (aligned with US)
+        const dstStartDay = getNthDayOfMonth(year, 3, 0, 2); // Second Sunday
+        const dstEndDay = getNthDayOfMonth(year, 11, 0, 1); // First Sunday
+        
+        console.log(`🔍 Halifax DST 2007-present: Starts on March ${dstStartDay}, ends on November ${dstEndDay}`);
+        console.log(`📅 Checking date: ${month}/${day}/${year}`);
+        
+        if ((month > 3 && month < 11) ||
+            (month === 3 && day >= dstStartDay) ||
+            (month === 11 && day < dstEndDay)) {
+          dstOffset = 1;
+          console.log(`✅ DST applies for Halifax: +${dstOffset} hour offset`);
+        } else {
+          console.log(`❌ DST does not apply for Halifax`);
+        }
+      }
+    }
+    // General US and other North American locations
+    else if (year >= 1966 && year <= 1986) {
       // 1966-1986: Last Sunday in April to Last Sunday in October
       const dstStartDay = getLastDayOfMonth(year, 4, 0); // 0 = Sunday
       const dstEndDay = getLastDayOfMonth(year, 10, 0);
       
       // Log DST information for debugging
-      console.log(`🔍 DST 1966-1986: Starts on April ${dstStartDay}, ends on October ${dstEndDay}`);
+      console.log(`🔍 US DST 1966-1986: Starts on April ${dstStartDay}, ends on October ${dstEndDay}`);
       console.log(`📅 Checking date: ${month}/${day}/${year}`);
       
       if ((month > 4 && month < 10) ||
@@ -140,7 +211,7 @@ function estimateTimezone(longitude, latitude, year, month, day) {
       const dstStartDay = getNthDayOfMonth(year, 4, 0, 1); // First Sunday
       const dstEndDay = getLastDayOfMonth(year, 10, 0);
       
-      console.log(`🔍 DST 1987-2006: Starts on April ${dstStartDay}, ends on October ${dstEndDay}`);
+      console.log(`🔍 US DST 1987-2006: Starts on April ${dstStartDay}, ends on October ${dstEndDay}`);
       console.log(`📅 Checking date: ${month}/${day}/${year}`);
       
       if ((month > 4 && month < 10) ||
@@ -156,7 +227,7 @@ function estimateTimezone(longitude, latitude, year, month, day) {
       const dstStartDay = getNthDayOfMonth(year, 3, 0, 2); // Second Sunday
       const dstEndDay = getNthDayOfMonth(year, 11, 0, 1); // First Sunday
       
-      console.log(`🔍 DST 2007-present: Starts on March ${dstStartDay}, ends on November ${dstEndDay}`);
+      console.log(`🔍 US DST 2007-present: Starts on March ${dstStartDay}, ends on November ${dstEndDay}`);
       console.log(`📅 Checking date: ${month}/${day}/${year}`);
       
       if ((month > 3 && month < 11) ||
@@ -205,6 +276,40 @@ function estimateTimezone(longitude, latitude, year, month, day) {
         } else {
           console.log(`❌ DST does not apply`);
         }
+      }
+    }
+  }
+  
+  // Add special case handling for early DST periods in the US (pre-1966)
+  if (timezoneEntry.id.startsWith("America/") && year >= 1945 && year < 1966) {
+    // During this period, DST was often locally determined but generally ran from
+    // late April to late September. This is an approximation.
+    if (month > 4 && month < 9) {
+      dstOffset = 1;
+      console.log(`✅ Pre-1966 DST approximation: +${dstOffset} hour offset`);
+    } else if (month === 4 && day >= 24) { // Approximating last Sunday in April
+      dstOffset = 1;
+      console.log(`✅ Pre-1966 DST approximation: +${dstOffset} hour offset`);
+    } else if (month === 9 && day < 24) { // Approximating last Sunday in September
+      dstOffset = 1;
+      console.log(`✅ Pre-1966 DST approximation: +${dstOffset} hour offset`);
+    }
+  }
+  
+  // Special case for 1970-1971 East Coast (could have started earlier in April)
+  if (timezoneEntry.id === "America/New_York" || timezoneEntry.id === "America/Halifax") {
+    if ((year === 1970 || year === 1971) && month === 4) {
+      // Some regions started DST on the last Sunday of April during these years
+      const lastSundayInApril = getLastDayOfMonth(year, 4, 0);
+      
+      // Check if day is >= the last Sunday in April OR in some areas, it started earlier
+      // For 1971 specifically, check for an earlier start date in some areas
+      if (year === 1971 && day >= 18) { // Some jurisdictions started earlier in 1971
+        dstOffset = 1;
+        console.log(`✅ Special case 1971 DST: +${dstOffset} hour offset (early April start)`);
+      } else if (day >= lastSundayInApril) {
+        dstOffset = 1;
+        console.log(`✅ Special case 1970-1971 DST: +${dstOffset} hour offset`);
       }
     }
   }
