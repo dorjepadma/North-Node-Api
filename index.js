@@ -45,22 +45,7 @@ function getOrdinal(n) {
   if (j === 3 && k !== 13) return "rd";
   return "th";
 }
-// // Helper function to get the last specified day of a month
-// function getLastDayOfMonth(year, month, targetDayOfWeek) {
-//   // Get the last day of the month
-//   const lastDay = new Date(year, month, 0).getDate();
-  
-//   // Start from the last day of the month
-//   let date = new Date(year, month - 1, lastDay);
-  
-//   // Move backwards until we find the target day of week
-//   while (date.getDay() !== targetDayOfWeek) {
-//     date.setDate(date.getDate() - 1);
-//   }
-  
-//   return date.getDate();
-// }
-
+÷
 // Helper function to get the nth specified day of a month
 function getNthDayOfMonth(year, month, dayOfWeek, n) {
   // Create a date for the first day of the month
