@@ -1,4 +1,3 @@
-// ✯ North Node API with Swiss Ephemeris and accurate house determination
 require("dotenv").config();
 const express = require("express");
 const swisseph = require('swisseph-v2');
@@ -59,6 +58,12 @@ function getLastDayOfMonth(year, month, targetDayOfWeek) {
     date.setDate(date.getDate() - 1);
   }
   
+  // Debug logs for DST calculation especially for April 1971
+  if (year === 1971 && month === 4) {
+    console.log(`🔍 Last day of April 1971: ${lastDay}`);
+    console.log(`🔍 Last Sunday of April 1971: ${date.getDate()}`);
+  }
+  
   return date.getDate();
 }
 
@@ -79,6 +84,11 @@ function getNthDayOfMonth(year, month, dayOfWeek, n) {
 
 // Process timezone information from request
 function processTimezone(longitude, latitude, year, month, day, hour, tzParam = null) {
+  // Debug output for 1971 test case
+  if (year === 1971 && month === 4) {
+    console.log(`⚠️ TESTING: Processing timezone for April 1971 - day ${day}`);
+  }
+
   // If the user has explicitly provided a timezone, parse and use it
   if (tzParam) {
     // Parse formats like "EST+5:00" or "EST-5:00" or "EST+5" or "+5:00"
@@ -149,6 +159,12 @@ function processTimezone(longitude, latitude, year, month, day, hour, tzParam = 
   // Known DST rules for specific regions and time periods
   let dstOffset = 0;
   
+  // Additional debug logs
+  if (year === 1971 && month === 4) {
+    console.log(`🔍 DEBUG: Testing DST for April 1971 in ${timezoneEntry.id}`);
+    console.log(`🔍 Standard offset for this timezone: ${timezoneEntry.stdOffset}`);
+  }
+  
   // US/Canada DST handling
   if (timezoneEntry.id.startsWith("America/")) {
     // For US East Coast
@@ -160,6 +176,14 @@ function processTimezone(longitude, latitude, year, month, day, hour, tzParam = 
         
         console.log(`🔍 US DST 1966-1986: Starts on April ${dstStartDay}, ends on October ${dstEndDay}`);
         console.log(`📅 Checking date: ${month}/${day}/${year}`);
+        
+        // Extra logging for 1971 April
+        if (year === 1971 && month === 4) {
+          console.log(`⚠️ 1971 APRIL TEST CASE:`);
+          console.log(`   - Last Sunday in April 1971: Day ${dstStartDay}`);
+          console.log(`   - Current day: ${day}`);
+          console.log(`   - DST should apply? ${day >= dstStartDay ? "YES" : "NO"}`);
+        }
         
         if ((month > 4 && month < 10) ||
             (month === 4 && day >= dstStartDay) ||
@@ -266,6 +290,14 @@ function processTimezone(longitude, latitude, year, month, day, hour, tzParam = 
     }
   }
   
+  // Final debug logs
+  if (year === 1971 && month === 4) {
+    console.log(`🔄 FINAL CALCULATION for April ${day}, 1971:`);
+    console.log(`   - Base timezone offset: ${timezoneEntry.stdOffset}`);
+    console.log(`   - DST offset applied: ${dstOffset}`);
+    console.log(`   - Total offset: ${timezoneEntry.stdOffset + dstOffset}`);
+  }
+  
   // Return timezone info
   return {
     id: timezoneEntry.id,
@@ -289,6 +321,12 @@ app.get("/north-node", (req, res) => {
   const latNum = parseFloat(lat);
   const lonNum = parseFloat(lon);
   
+  // Add test case detection
+  if (localYear === 1971 && localMonth === 4) {
+    console.log(`\n\n🧪 TEST CASE DETECTED: April ${localDay}, 1971 at ${localHour} hours`);
+    console.log(`🌎 Location: ${latNum}° lat, ${lonNum}° lon\n\n`);
+  }
+  
   // Process timezone - use explicit timezone if provided, otherwise estimate based on location
   const timezone = processTimezone(lonNum, latNum, localYear, localMonth, localDay, localHour, tz);
   console.log(`🕒 Using timezone: ${timezone.id} (UTC${timezone.offset >= 0 ? '+' : ''}${timezone.offset})`);
@@ -297,11 +335,43 @@ app.get("/north-node", (req, res) => {
   let utHour = localHour - timezone.offset;
 
   // Ensure UT hour is within proper range (0-24)
-  while (utHour < 0) utHour += 24;
-  while (utHour >= 24) utHour -= 24;
+  let dayAdjustment = 0;
+  while (utHour < 0) {
+    utHour += 24;
+    dayAdjustment -= 1;
+  }
+  while (utHour >= 24) {
+    utHour -= 24;
+    dayAdjustment += 1;
+  }
+
+  // Adjust day if needed
+  let utDay = localDay + dayAdjustment;
+  let utMonth = localMonth;
+  let utYear = localYear;
+  
+  // Handle month and year boundaries if day adjustment crosses them
+  if (dayAdjustment !== 0) {
+    // Create a Date object to handle the date arithmetic correctly
+    const date = new Date(utYear, utMonth - 1, utDay);  // JS months are 0-based
+    utYear = date.getFullYear();
+    utMonth = date.getMonth() + 1;  // Convert back to 1-based month
+    utDay = date.getDate();
+    
+    console.log(`📅 Date adjusted for UT: ${utYear}-${utMonth}-${utDay}`);
+  }
 
   // Calculate Julian Day with UT time
-  const jd = swisseph.swe_julday(localYear, localMonth, localDay, utHour, swisseph.SE_GREG_CAL);
+  const jd = swisseph.swe_julday(utYear, utMonth, utDay, utHour, swisseph.SE_GREG_CAL);
+  
+  // Enhanced logging for 1971 test case
+  if (localYear === 1971 && localMonth === 4) {
+    console.log(`\n🕰️ DETAILED TIME CALCULATIONS:`);
+    console.log(`   - Local date/time: ${localYear}-${localMonth}-${localDay} ${localHour.toFixed(4)}`);
+    console.log(`   - Timezone offset: ${timezone.offset} hours`);
+    console.log(`   - UT date/time: ${utYear}-${utMonth}-${utDay} ${utHour.toFixed(4)}`);
+    console.log(`   - Julian Day: ${jd.toFixed(6)}`);
+  }
   
   console.log(`🕒 Local time: ${localHour.toFixed(4)} hours`);
   console.log(`🕒 UT time: ${utHour.toFixed(4)} hours`);
@@ -398,7 +468,36 @@ app.get("/north-node", (req, res) => {
   });
 });
 
+// Add a test endpoint specifically for checking DST in 1971
+app.get("/test-dst-1971", (req, res) => {
+  const results = [];
+  const year = 1971;
+  const month = 4;
+  const longitude = -74; // New York
+  const latitude = 40.7;
+  
+  // Test every day in April 1971
+  for (let day = 1; day <= 30; day++) {
+    const timezone = processTimezone(longitude, latitude, year, month, day, 12);
+    
+    results.push({
+      date: `1971-04-${day.toString().padStart(2, '0')}`,
+      timezoneName: timezone.id,
+      stdOffset: timezone.offset - (timezone.offset % 1), // Base offset without DST
+      dstApplied: timezone.offset % 1 === 0 ? false : true,
+      totalOffset: timezone.offset
+    });
+  }
+  
+  res.json({
+    title: "DST Test Results for April 1971",
+    description: "Checking DST application for each day",
+    results
+  });
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`🚀 North Node API running on http://localhost:${PORT}`);
+  console.log(`📌 Added special test endpoint for 1971 DST: http://localhost:${PORT}/test-dst-1971`);
 });
