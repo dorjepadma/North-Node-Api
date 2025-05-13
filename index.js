@@ -4,7 +4,6 @@ const swisseph = require('swisseph-v2');
 const path = require("path");
 const cors = require("cors");
 const { DateTime } = require("luxon");
-const geoTz = require('geo-tz'); // Add this package
 
 const app = express();
 app.use(cors({
@@ -47,15 +46,57 @@ function getOrdinal(n) {
 }
 
 /**
- * Process timezone and DST information using modern libraries
- * @param {number} longitude - The longitude coordinate
- * @param {number} latitude - The latitude coordinate
- * @param {number} year - The year
- * @param {number} month - The month (1-12)
- * @param {number} day - The day of month
- * @param {number} hour - The hour (0-24)
- * @param {string|null} tzParam - Optional timezone parameter
- * @returns {Object} Timezone information with id and offset
+ * Map longitude to IANA timezone identifier
+ * This is a simplified version that covers major US and international timezones
+ */
+function getLikelyTimezoneId(longitude, latitude) {
+  // US locations with state-specific handling
+  if (latitude >= 24 && latitude <= 50 && longitude >= -125 && longitude <= -66) {
+    // Eastern US (includes Connecticut)
+    if (longitude >= -83 && longitude <= -66) {
+      return "America/New_York";  // UTC-5
+    }
+    // Central US
+    else if (longitude >= -93 && longitude < -83) {
+      return "America/Chicago";  // UTC-6
+    }
+    // Mountain US
+    else if (longitude >= -112 && longitude < -93) {
+      return "America/Denver";  // UTC-7
+    }
+    // Pacific US
+    else if (longitude >= -125 && longitude < -112) {
+      return "America/Los_Angeles";  // UTC-8
+    }
+  }
+  
+  // International locations (simplified mapping)
+  if (longitude >= -14 && longitude <= 0) {
+    return "Europe/London";  // UTC+0
+  } else if (longitude > 0 && longitude <= 30) {
+    return "Europe/Paris";   // UTC+1
+  } else if (longitude > 30 && longitude <= 60) {
+    return "Europe/Moscow";  // UTC+3
+  } else if (longitude > 60 && longitude <= 90) {
+    return "Asia/Kolkata";   // UTC+5:30
+  } else if (longitude > 90 && longitude <= 135) {
+    return "Asia/Shanghai";  // UTC+8
+  } else if (longitude > 135 && longitude <= 150) {
+    return "Asia/Tokyo";     // UTC+9
+  } else if (longitude > 150 && longitude <= 180) {
+    return "Pacific/Auckland"; // UTC+12
+  } else if (longitude > -60 && longitude <= -14) {
+    return "Atlantic/Azores"; // UTC-1
+  } else if (longitude > -150 && longitude <= -125) {
+    return "America/Anchorage"; // UTC-9
+  } else {
+    return "Etc/UTC";
+  }
+}
+
+/**
+ * Process timezone and DST information using Luxon
+ * Properly handles historical DST transitions based on the article recommendations
  */
 function processTimezone(longitude, latitude, year, month, day, hour, tzParam = null) {
   // If explicit timezone is provided, parse and use it
@@ -73,7 +114,6 @@ function processTimezone(longitude, latitude, year, month, day, hour, tzParam = 
       
       console.log(`🌐 Parsed timezone: ${code} (UTC${offset >= 0 ? '+' : ''}${offset})`);
       
-      // For EST+5:00 format, this means EST is 5 hours ahead of UTC, so we need to negate
       return {
         id: code,
         offset: -offset  // Negate the offset for calculations
@@ -95,29 +135,117 @@ function processTimezone(longitude, latitude, year, month, day, hour, tzParam = 
     }
   }
   
-  // Use geo-tz to determine the timezone for the given coordinates
-  const tzid = geoTz(latitude, longitude)[0];
+  // Use our lookup function to determine the timezone for the given coordinates
+  const tzid = getLikelyTimezoneId(longitude, latitude);
   console.log(`🌎 Determined timezone from coordinates: ${tzid}`);
   
-  // Create a DateTime object for the given date and timezone
-  const dateTime = DateTime.fromObject({
-    year,
-    month,
-    day,
-    hour
-  }, { zone: tzid });
-  
-  // Extract timezone information from the DateTime object
-  const offset = -dateTime.offset / 60; // Convert minutes to hours and negate for astronomical calculations
-  
-  console.log(`🕒 Date: ${year}-${month}-${day} ${hour}:00 in ${tzid}`);
-  console.log(`🕒 UTC Offset: ${offset} hours (including DST: ${dateTime.isInDST})`);
-  
-  return {
-    id: tzid,
-    offset: offset,
-    isDST: dateTime.isInDST
+  try {
+    // Create a DateTime object for the given date and timezone
+    // Use the 'earlier' offset for ambiguous times to match historical behavior
+    const dtOptions = { 
+      zone: tzid,
+      offset: "earlier", // For ambiguous times during fall-back transitions
+      invalid: "constrain" // For non-existent times during spring-forward transitions
+    };
+    
+    const dateTime = DateTime.fromObject({
+      year,
+      month,
+      day,
+      hour
+    }, dtOptions);
+    
+    // Check if the date is valid
+    if (!dateTime.isValid) {
+      console.log(`⚠️ Warning: Invalid date created: ${dateTime.invalidReason}`);
+      
+      // Fallback for invalid dates
+      return {
+        id: tzid,
+        offset: getStandardOffset(tzid),
+        isDST: false
+      };
+    }
+    
+    // Extract timezone information including offset and DST status
+    const offset = -dateTime.offset / 60; // Convert minutes to hours and negate for astronomical calculations
+    
+    // Detailed logging for analysis
+    console.log(`🕒 Date: ${year}-${month}-${day} ${hour}:00 in ${tzid}`);
+    console.log(`🕒 UTC Offset: ${offset} hours (including DST: ${dateTime.isInDST})`);
+    
+    // Analyze DST transition points if we're near a potential boundary
+    const checkNearTransition = () => {
+      try {
+        // Try to determine the next DST transition
+        const nextTransition = dateTime.zone.nextTransition(dateTime);
+        
+        // If there is a transition and it's within 5 days of our date
+        if (nextTransition && Math.abs(nextTransition.diff(dateTime, 'days').days) < 5) {
+          console.log(`⚠️ NEAR DST TRANSITION: ${nextTransition.toISO()}`);
+          console.log(`   Current DST status: ${dateTime.isInDST ? "IN DST" : "NOT IN DST"}`);
+          console.log(`   Current offset: ${dateTime.offset} minutes`);
+          
+          // Check the offset before and after the transition
+          const beforeTransition = nextTransition.minus({ minutes: 1 });
+          const afterTransition = nextTransition.plus({ minutes: 1 });
+          
+          console.log(`   Before transition: offset=${beforeTransition.offset}, DST=${beforeTransition.isInDST}`);
+          console.log(`   After transition: offset=${afterTransition.offset}, DST=${afterTransition.isInDST}`);
+        }
+      } catch (e) {
+        // Some older timestamps might not have transition data
+        console.log(`   Unable to determine transitions: ${e.message}`);
+      }
+    };
+    
+    // Run the transition check for dates that might be problematic
+    checkNearTransition();
+    
+    return {
+      id: tzid,
+      offset: offset,
+      isDST: dateTime.isInDST,
+      luxonObject: dateTime // Include the luxon object for potential advanced usage
+    };
+  } catch (error) {
+    console.log(`⚠️ Error processing date with Luxon: ${error.message}`);
+    
+    // Fallback to standard timezone offset without DST
+    return {
+      id: tzid,
+      offset: getStandardOffset(tzid),
+      isDST: false
+    };
+  }
+}
+
+/**
+ * Get the standard (non-DST) offset for a timezone
+ */
+function getStandardOffset(tzid) {
+  // Common timezone standard offsets (without DST)
+  const standardOffsets = {
+    "America/New_York": -5,
+    "America/Chicago": -6,
+    "America/Denver": -7,
+    "America/Los_Angeles": -8,
+    "America/Anchorage": -9,
+    "America/Halifax": -4,
+    "Europe/London": 0,
+    "Europe/Paris": 1,
+    "Europe/Berlin": 1,
+    "Europe/Moscow": 3,
+    "Asia/Dubai": 4,
+    "Asia/Kolkata": 5.5,
+    "Asia/Shanghai": 8,
+    "Asia/Tokyo": 9,
+    "Australia/Sydney": 10,
+    "Pacific/Auckland": 12,
+    "Etc/UTC": 0
   };
+  
+  return standardOffsets[tzid] || 0;
 }
 
 // API route handler for North Node calculation
@@ -136,63 +264,65 @@ app.get("/north-node", (req, res) => {
   const latNum = parseFloat(lat);
   const lonNum = parseFloat(lon);
   
-  // Add test case detection
-  if (localYear === 1971 && localMonth === 4) {
-    console.log(`\n\n🧪 TEST CASE DETECTED: April ${localDay}, 1971 at ${localHour} hours`);
-    console.log(`🌎 Location: ${latNum}° lat, ${lonNum}° lon\n\n`);
-  }
+  // Debug logging
+  console.log(`\n📊 Processing request for ${localYear}-${localMonth}-${localDay} ${localHour} at ${latNum}, ${lonNum}`);
   
   // Process timezone - use explicit timezone if provided, otherwise determine based on location
   const timezone = processTimezone(lonNum, latNum, localYear, localMonth, localDay, localHour, tz);
   console.log(`🕒 Using timezone: ${timezone.id} (UTC${timezone.offset >= 0 ? '+' : ''}${timezone.offset})`);
 
-  // Convert local time to UT
-  let utHour = localHour - timezone.offset;
+  // Convert local time to UT using Luxon's capabilities if available
+  let utHour, utDay, utMonth, utYear;
+  
+  // If we have a Luxon DateTime object, use it for the UT conversion
+  if (timezone.luxonObject) {
+    const utcDateTime = timezone.luxonObject.toUTC();
+    utYear = utcDateTime.year;
+    utMonth = utcDateTime.month;
+    utDay = utcDateTime.day;
+    utHour = utcDateTime.hour + (utcDateTime.minute / 60) + (utcDateTime.second / 3600);
+    
+    console.log(`🕒 Converting to UT using Luxon: ${utcDateTime.toISO()}`);
+  } else {
+    // Fallback to manual calculation if Luxon object not available
+    utHour = localHour - timezone.offset;
 
-  // Ensure UT hour is within proper range (0-24)
-  let dayAdjustment = 0;
-  while (utHour < 0) {
-    utHour += 24;
-    dayAdjustment -= 1;
-  }
-  while (utHour >= 24) {
-    utHour -= 24;
-    dayAdjustment += 1;
-  }
+    // Ensure UT hour is within proper range (0-24)
+    let dayAdjustment = 0;
+    while (utHour < 0) {
+      utHour += 24;
+      dayAdjustment -= 1;
+    }
+    while (utHour >= 24) {
+      utHour -= 24;
+      dayAdjustment += 1;
+    }
 
-  // Create a Date object to handle date adjustments correctly
-  const localDate = new Date(localYear, localMonth - 1, localDay);
-  // Apply the day adjustment if any
-  if (dayAdjustment !== 0) {
-    localDate.setDate(localDate.getDate() + dayAdjustment);
+    // Create a Date object to handle date adjustments correctly
+    const localDate = new Date(localYear, localMonth - 1, localDay);
+    // Apply the day adjustment if any
+    if (dayAdjustment !== 0) {
+      localDate.setDate(localDate.getDate() + dayAdjustment);
+    }
+    
+    // Get the adjusted date components for UT
+    utYear = localDate.getFullYear();
+    utMonth = localDate.getMonth() + 1; // Convert 0-based month to 1-based
+    utDay = localDate.getDate();
+    
+    console.log(`🕒 Converting to UT manually: ${utYear}-${utMonth}-${utDay} ${utHour}`);
   }
   
-  // Get the adjusted date components for UT
-  const utYear = localDate.getFullYear();
-  const utMonth = localDate.getMonth() + 1; // Convert 0-based month to 1-based
-  const utDay = localDate.getDate();
-  
-  if (dayAdjustment !== 0) {
-    console.log(`📅 Date adjusted for UT: ${utYear}-${utMonth}-${utDay}`);
-  }
+  // Log the conversion details
+  console.log(`\n🕰️ DETAILED TIME CALCULATIONS:`);
+  console.log(`   - Local date/time: ${localYear}-${localMonth}-${localDay} ${localHour.toFixed(4)}`);
+  console.log(`   - Timezone offset: ${timezone.offset} hours (DST: ${timezone.isDST ? "Yes" : "No"})`);
+  console.log(`   - UT date/time: ${utYear}-${utMonth}-${utDay} ${utHour.toFixed(4)}`);
 
   // Calculate Julian Day with UT time
   const jd = swisseph.swe_julday(utYear, utMonth, utDay, utHour, swisseph.SE_GREG_CAL);
+  console.log(`   - Julian Day: ${jd.toFixed(6)}`);
   
-  // Enhanced logging for 1971 test case
-  if (localYear === 1971 && localMonth === 4) {
-    console.log(`\n🕰️ DETAILED TIME CALCULATIONS:`);
-    console.log(`   - Local date/time: ${localYear}-${localMonth}-${localDay} ${localHour.toFixed(4)}`);
-    console.log(`   - Timezone offset: ${timezone.offset} hours (DST: ${timezone.isDST ? "Yes" : "No"})`);
-    console.log(`   - UT date/time: ${utYear}-${utMonth}-${utDay} ${utHour.toFixed(4)}`);
-    console.log(`   - Julian Day: ${jd.toFixed(6)}`);
-  }
-  
-  console.log(`🕒 Local time: ${localHour.toFixed(4)} hours`);
-  console.log(`🕒 UT time: ${utHour.toFixed(4)} hours`);
-  console.log("🧲 Julian Day:", jd);
-  console.log("📍 Parsed lat/lon:", latNum, lonNum);
-
   // Get sidereal time
   const sidtime = swisseph.swe_sidtime(jd);
   console.log("🕒 Sidereal time:", sidtime.siderialTime);
@@ -283,54 +413,7 @@ app.get("/north-node", (req, res) => {
   });
 });
 
-// Add a test endpoint to check a specific date/time in multiple locations
-app.get("/test-timezone", (req, res) => {
-  const { year, month, day, hour } = req.query;
-  
-  if (!year || !month || !day || !hour) {
-    return res.status(400).json({ error: "Missing date/time parameters" });
-  }
-  
-  const testYear = parseInt(year);
-  const testMonth = parseInt(month);
-  const testDay = parseInt(day);
-  const testHour = parseFloat(hour);
-  
-  // Test locations
-  const locations = [
-    { name: "Manchester, CT", lat: 41.7759, lon: -72.5215 },
-    { name: "New York, NY", lat: 40.7128, lon: -74.0060 },
-    { name: "Boston, MA", lat: 42.3601, lon: -71.0589 },
-    { name: "Halifax, NS", lat: 44.6488, lon: -63.5752 },
-    { name: "Chicago, IL", lat: 41.8781, lon: -87.6298 },
-    { name: "Los Angeles, CA", lat: 34.0522, lon: -118.2437 },
-    { name: "London, UK", lat: 51.5074, lon: -0.1278 },
-    { name: "Paris, France", lat: 48.8566, lon: 2.3522 },
-    { name: "Tokyo, Japan", lat: 35.6762, lon: 139.6503 }
-  ];
-  
-  const results = locations.map(location => {
-    const tz = processTimezone(location.lon, location.lat, testYear, testMonth, testDay, testHour);
-    
-    return {
-      location: location.name,
-      coordinates: `${location.lat}, ${location.lon}`,
-      timezone: tz.id,
-      utcOffset: tz.offset,
-      isDST: tz.isDST
-    };
-  });
-  
-  res.json({
-    title: `Timezone Test for ${testYear}-${testMonth}-${testDay} ${testHour}:00`,
-    results
-  });
-});
-
 // Start the server
 app.listen(PORT, () => {
   console.log(`🚀 North Node API running on http://localhost:${PORT}`);
-  console.log(`📌 Test endpoints available at: 
-    - http://localhost:${PORT}/test-timezone?year=1971&month=4&day=18&hour=5.25
-    - http://localhost:${PORT}/north-node?year=1971&month=4&day=18&hour=5.25&lat=41.7759301&lon=-72.5215008&tz=EST+5:00`);
 });
